@@ -182,7 +182,7 @@ async fn main() {
 
     let cors = warp::cors()
         .allow_any_origin()
-        .allow_headers(vec!["content-type"])
+        .allow_headers(vec!["content-type", "x-hashcash"])
         .allow_methods(vec!["GET", "POST"]);
 
     let router = upload_route
