@@ -1,32 +1,22 @@
-//! Rust implementation of hashcash anti-spam / denial of service
-//! counter-measure tool.
-
-use base64::{decode, encode_config};
-use chrono::prelude::*;
-use chrono::Duration;
 use sha1::{Digest, Sha1};
 use thiserror::Error;
-
-const DATE_FMT: &str = "%y%m%d";
 
 /// Stores a destructured hashcash token by its various components.
 #[derive(Debug, PartialEq)]
 pub struct Token {
     pub ver: u8,
     pub bits: u32,
-    pub date: NaiveDate,
+    pub date: String,
     pub resource: String,
     pub ext: String,
-    pub rand: Vec<u8>,
-    pub counter: Vec<u8>,
+    pub rand: String,
+    pub counter: String,
 }
 
 /// Various error types that are used during the validation of a
 /// `hashcash::Token`.
 #[derive(Error, Debug)]
 pub enum HashcashError {
-    #[error("date is older than two days")]
-    ExpiryError,
     #[error("hash does not satisfy declared difficulty bits")]
     DifficultyError,
     #[error("parse error")]
@@ -64,24 +54,9 @@ impl Token {
                 return Err(HashcashError::ParseError("Invalid difficulty specifier"));
             }
         };
-        let date = match NaiveDate::parse_from_str(stamp_parts[2], DATE_FMT) {
-            Ok(d) => d,
-            Err(_) => {
-                return Err(HashcashError::ParseError("Invalid date specifier"));
-            }
-        };
-        let rand = match decode(stamp_parts[5]) {
-            Ok(v) => v,
-            Err(_) => {
-                return Err(HashcashError::ParseError("Invalid base64 random string"));
-            }
-        };
-        let counter = match decode(stamp_parts[6]) {
-            Ok(v) => v,
-            Err(_) => {
-                return Err(HashcashError::ParseError("Invalid base64 counter string"));
-            }
-        };
+        let date = stamp_parts[2].to_string();
+        let rand = stamp_parts[5].to_string();
+        let counter = stamp_parts[6].to_string();
 
         Ok(Token {
             ver,
@@ -132,38 +107,21 @@ impl Token {
             return Err(HashcashError::DifficultyError);
         }
 
-        let expires_after = Duration::days(2);
-        let time_delta = get_current_naive_date() - self.date;
-
-        if time_delta >= expires_after {
-            return Err(HashcashError::ExpiryError);
-        }
-
         Ok(self)
     }
 
     /// Returns a fully qualified hashcash token string suitable for use as a
     /// `X-Hashcash` header value or otherwise.
     pub fn to_string(&self) -> String {
-        let rand = encode_config(&self.rand, base64::STANDARD_NO_PAD);
-        let counter = encode_config(&self.counter, base64::STANDARD_NO_PAD);
-
         format!(
             "{}:{}:{}:{}:{}:{}:{}",
-            self.ver.to_string(),
-            self.bits.to_string(),
-            self.date.format(DATE_FMT),
+            self.ver,
+            self.bits,
+            self.date,
             self.resource,
             self.ext,
-            rand,
-            counter
+            self.rand,
+            self.counter
         )
     }
-}
-
-fn get_current_naive_date() -> NaiveDate {
-    let date = Utc::now().to_rfc3339();
-    let date_normalized = DateTime::parse_from_rfc3339(&date).unwrap();
-
-    date_normalized.naive_utc().date()
 }

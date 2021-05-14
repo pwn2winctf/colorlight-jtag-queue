@@ -5,16 +5,22 @@ use uuid::Uuid;
 use warp::{
     http::StatusCode,
     multipart::{FormData, Part},
+    reject::Reject,
     Filter, Rejection, Reply,
 };
 
 mod hashcash;
 mod pow;
 
+const MAX_FILE_SIZE: u64 = 600_000;
+
 #[tokio::main]
 async fn main() {
     let pow_handler = pow::PoWHandler::new();
     let pow_handler_filter = warp::any().map(move || pow_handler.clone());
+    let hashcash_filter = warp::header::<String>("x-hashcash")
+        .or(warp::any().map(|| String::new()))
+        .unify();
 
     let token_route = warp::path("token")
         .and(warp::get())
@@ -23,7 +29,9 @@ async fn main() {
 
     let upload_route = warp::path("upload")
         .and(warp::post())
-        .and(warp::multipart::form().max_length(600_000))
+        .and(pow_handler_filter.clone())
+        .and(hashcash_filter)
+        .and(warp::multipart::form().max_length(MAX_FILE_SIZE))
         .and_then(upload);
 
     let router = upload_route.or(token_route).recover(handle_rejection);
@@ -36,7 +44,15 @@ async fn get_token(pow_handler: pow::PoWHandler) -> Result<impl Reply, Rejection
     Ok(warp::reply::json(&token))
 }
 
-async fn upload(form: FormData) -> Result<impl Reply, Rejection> {
+async fn upload(
+    mut pow_handler: pow::PoWHandler,
+    token: String,
+    form: FormData,
+) -> Result<impl Reply, Rejection> {
+    pow_handler
+        .validate_token(&token.trim())
+        .map_err(|e| warp::reject::custom(e))?;
+
     let parts: Vec<Part> = form.try_collect().await.map_err(|e| {
         eprintln!("form error: {}", e);
         warp::reject::reject()
@@ -68,11 +84,15 @@ async fn upload(form: FormData) -> Result<impl Reply, Rejection> {
     Ok("success")
 }
 
+impl Reject for pow::PoWError {}
+
 async fn handle_rejection(err: Rejection) -> std::result::Result<impl Reply, Infallible> {
     let (code, message) = if err.is_not_found() {
         (StatusCode::NOT_FOUND, "Not Found".to_string())
-    } else if err.find::<warp::reject::PayloadTooLarge>().is_some() {
+    } else if let Some(_) = err.find::<warp::reject::PayloadTooLarge>() {
         (StatusCode::BAD_REQUEST, "Payload too large".to_string())
+    } else if let Some(e) = err.find::<pow::PoWError>() {
+        (StatusCode::BAD_REQUEST, format!("{:#?}", e))
     } else {
         eprintln!("unhandled error: {:?}", err);
         (
