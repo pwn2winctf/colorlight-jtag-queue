@@ -1,0 +1,23 @@
+[package]
+name = "colorlight-jtag-queue"
+version = "0.1.0"
+authors = ["Paulo Matias <matias@ufscar.br>"]
+edition = "2018"
+
+[dependencies]
+thiserror = "1.0.24"
+tokio = { version = "1.5.0", features = ["full"] }
+warp = "0.3.1"
+serde = { version = "1.0.126", features = ["derive"] }
+uuid = { version = "0.8.2", features = ["v4"] }
+futures = { version = "0.3.15", default-features = true }
+bytes = "1.0.1"
+atomic-counter = "1.0.1"
+concurrent-queue = "1.2.2"
+chrono = "0.4.19"
+base64 = "0.13.0"
+sha-1 = "0.9.6"
+hmac = "0.11.0"
+sha3 = "0.9.1"
+byteorder = "1.4.3"
+bloomfilter = "1.0.5"
