@@ -20,7 +20,7 @@ use thiserror::Error;
 use uuid::Uuid;
 use wait_timeout::ChildExt;
 use warp::{
-    http::StatusCode,
+    http::{StatusCode, header::{HeaderMap, HeaderValue}},
     multipart::{FormData, Part},
     reject::Reject,
     Filter, Rejection, Reply,
@@ -175,15 +175,20 @@ async fn main() {
         .or(warp::any().map(|| String::new()))
         .unify();
 
+    let mut cache_headers = HeaderMap::new();
+    cache_headers.insert("cache-control", HeaderValue::from_static("max-age=1, s-maxage=1, stale-while-revalidate, public"));
+
     let token_route = warp::path("token")
         .and(warp::get())
         .and(pow_mgr_filter.clone())
-        .and_then(get_token);
+        .and_then(get_token)
+        .with(warp::reply::with::headers(cache_headers.clone()));
 
     let status_route = warp::path("status")
         .and(warp::get())
         .and(queue_filter.clone())
-        .and_then(get_status);
+        .and_then(get_status)
+        .with(warp::reply::with::headers(cache_headers.clone()));
 
     let upload_route = warp::path("upload")
         .and(warp::post())
