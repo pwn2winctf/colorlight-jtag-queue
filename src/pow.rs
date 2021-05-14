@@ -57,21 +57,21 @@ impl PoWManager {
         }
     }
 
-    pub fn get_token(&self) -> Result<PoWToken, PoWError> {
+    pub fn get_token(&self) -> PoWToken {
         let expiration = time() + TIMEOUT;
         let mut buf = vec![];
         buf.write_u64::<LittleEndian>(expiration).unwrap();
         let mut mac = HmacSha3_256::new_from_slice(SECRET_KEY).unwrap();
         mac.update(buf.as_slice());
         buf.extend(mac.finalize().into_bytes());
-        return Ok(PoWToken {
+        PoWToken {
             expiration,
             command: format!(
                 "hashcash -Cmb{} {}",
                 DIFFICULTY,
                 base64::encode_config(buf, base64::URL_SAFE)
             ),
-        });
+        }
     }
 
     pub fn validate_token(&self, token: &str) -> Result<(), PoWError> {

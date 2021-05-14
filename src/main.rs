@@ -4,6 +4,7 @@ mod pow;
 use crate::pow::{PoWError, PoWManager};
 use bytes::BufMut;
 use futures::TryStreamExt;
+use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -43,10 +44,24 @@ pub enum APIError {
     ReqMissingFile,
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+enum FPGAState {
+    Wait,
+    Programming,
+    Running,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct QueueStatus {
+    enqueued: usize,
+    consumed: usize,
+    fpga: FPGAState,
+}
+
 #[derive(Debug, Clone)]
 struct Queue {
     enqueued: Arc<AtomicUsize>,
-    consumed: Arc<AtomicUsize>,
+    worker_state: Arc<AtomicUsize>,
     tx: mpsc::SyncSender<String>,
 }
 
@@ -56,7 +71,7 @@ impl Queue {
         (
             Queue {
                 enqueued: Arc::new(AtomicUsize::new(0)),
-                consumed: Arc::new(AtomicUsize::new(0)),
+                worker_state: Arc::new(AtomicUsize::new(0)),
                 tx,
             },
             rx,
@@ -68,17 +83,21 @@ fn worker_main(queue: Queue, rx: mpsc::Receiver<String>) {
     loop {
         let filename = match rx.recv() {
             Err(e) => {
+                // since we did not retrieve anything from queue, we should not advance state
                 eprintln!("cannot receive filename from channel: {:#?}", e);
                 continue;
             }
             Ok(v) => v,
         };
         println!(
-            "=> programming {:#?} ({} of {})",
+            "=> programming {:#?} ({}/{})",
             &filename,
-            queue.consumed.load(Ordering::SeqCst) / 2 + 1,
+            queue.worker_state.load(Ordering::SeqCst) / 3 + 1,
             queue.enqueued.load(Ordering::SeqCst)
         );
+
+        // state Wait -> Programming
+        queue.worker_state.fetch_add(1, Ordering::SeqCst);
 
         match Command::new("./program")
             .arg(&filename)
@@ -88,8 +107,9 @@ fn worker_main(queue: Queue, rx: mpsc::Receiver<String>) {
         {
             Err(e) => {
                 eprintln!("error spawning child: {:#?}", e);
-                // advance both status at a time (program and run)
-                queue.consumed.fetch_add(2, Ordering::SeqCst);
+
+                // state Programming -> Wait
+                queue.worker_state.fetch_add(2, Ordering::SeqCst);
             }
             Ok(mut child) => {
                 match child.wait_timeout_ms(PROGRAMMING_TIMEOUT_MS) {
@@ -103,12 +123,15 @@ fn worker_main(queue: Queue, rx: mpsc::Receiver<String>) {
                         }
                     }
                 }
-                // advance program status
-                queue.consumed.fetch_add(1, Ordering::SeqCst);
+
+                // state Programming -> Running
+                queue.worker_state.fetch_add(1, Ordering::SeqCst);
+
                 // wait and let run
                 std::thread::sleep(std::time::Duration::from_millis(FPGA_RUN_TIME_MS));
-                // advance run status
-                queue.consumed.fetch_add(1, Ordering::SeqCst);
+
+                // state Running -> Wait
+                queue.worker_state.fetch_add(1, Ordering::SeqCst);
             }
         }
 
@@ -139,6 +162,11 @@ async fn main() {
         .and(pow_mgr_filter.clone())
         .and_then(get_token);
 
+    let status_route = warp::path("status")
+        .and(warp::get())
+        .and(queue_filter.clone())
+        .and_then(get_status);
+
     let upload_route = warp::path("upload")
         .and(warp::post())
         .and(pow_mgr_filter.clone())
@@ -147,14 +175,31 @@ async fn main() {
         .and(warp::multipart::form().max_length(MAX_FILE_SIZE))
         .and_then(upload);
 
-    let router = upload_route.or(token_route).recover(handle_rejection);
+    let router = upload_route
+        .or(status_route)
+        .or(token_route)
+        .recover(handle_rejection);
     println!("Server started at localhost:8080");
     warp::serve(router).run(([0, 0, 0, 0], 8080)).await;
 }
 
 async fn get_token(pow_mgr: PoWManager) -> Result<impl Reply, Rejection> {
-    let token = pow_mgr.get_token().unwrap();
-    Ok(warp::reply::json(&token))
+    Ok(warp::reply::json(&pow_mgr.get_token()))
+}
+
+async fn get_status(queue: Queue) -> Result<impl Reply, Rejection> {
+    let worker_state = queue.worker_state.load(Ordering::SeqCst);
+    let enqueued = queue.enqueued.load(Ordering::SeqCst);
+    let res = QueueStatus {
+        enqueued,
+        consumed: worker_state / 3,
+        fpga: match worker_state % 3 {
+            1 => FPGAState::Programming,
+            2 => FPGAState::Running,
+            _ => FPGAState::Wait,
+        },
+    };
+    Ok(warp::reply::json(&res))
 }
 
 async fn upload(
