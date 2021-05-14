@@ -1,3 +1,6 @@
+mod hashcash;
+mod pow;
+
 use bytes::BufMut;
 use futures::TryStreamExt;
 use std::convert::Infallible;
@@ -8,28 +11,26 @@ use warp::{
     reject::Reject,
     Filter, Rejection, Reply,
 };
-
-mod hashcash;
-mod pow;
+use crate::pow::{PoWManager, PoWError};
 
 const MAX_FILE_SIZE: u64 = 600_000;
 
 #[tokio::main]
 async fn main() {
-    let pow_handler = pow::PoWHandler::new();
-    let pow_handler_filter = warp::any().map(move || pow_handler.clone());
+    let pow_mgr = PoWManager::new();
+    let pow_mgr_filter = warp::any().map(move || pow_mgr.clone());
     let hashcash_filter = warp::header::<String>("x-hashcash")
         .or(warp::any().map(|| String::new()))
         .unify();
 
     let token_route = warp::path("token")
         .and(warp::get())
-        .and(pow_handler_filter.clone())
+        .and(pow_mgr_filter.clone())
         .and_then(get_token);
 
     let upload_route = warp::path("upload")
         .and(warp::post())
-        .and(pow_handler_filter.clone())
+        .and(pow_mgr_filter.clone())
         .and(hashcash_filter)
         .and(warp::multipart::form().max_length(MAX_FILE_SIZE))
         .and_then(upload);
@@ -39,17 +40,17 @@ async fn main() {
     warp::serve(router).run(([0, 0, 0, 0], 8080)).await;
 }
 
-async fn get_token(pow_handler: pow::PoWHandler) -> Result<impl Reply, Rejection> {
-    let token = pow_handler.get_token().unwrap();
+async fn get_token(pow_mgr: PoWManager) -> Result<impl Reply, Rejection> {
+    let token = pow_mgr.get_token().unwrap();
     Ok(warp::reply::json(&token))
 }
 
 async fn upload(
-    pow_handler: pow::PoWHandler,
+    pow_mgr: PoWManager,
     token: String,
     form: FormData,
 ) -> Result<impl Reply, Rejection> {
-    pow_handler
+    pow_mgr
         .validate_token(&token)
         .map_err(|e| warp::reject::custom(e))?;
 
@@ -84,14 +85,14 @@ async fn upload(
     Ok("success")
 }
 
-impl Reject for pow::PoWError {}
+impl Reject for PoWError {}
 
 async fn handle_rejection(err: Rejection) -> std::result::Result<impl Reply, Infallible> {
     let (code, message) = if err.is_not_found() {
         (StatusCode::NOT_FOUND, "Not Found".to_string())
     } else if let Some(_) = err.find::<warp::reject::PayloadTooLarge>() {
         (StatusCode::BAD_REQUEST, "Payload too large".to_string())
-    } else if let Some(e) = err.find::<pow::PoWError>() {
+    } else if let Some(e) = err.find::<PoWError>() {
         (StatusCode::BAD_REQUEST, e.to_string())
     } else {
         eprintln!("unhandled error: {:?}", err);

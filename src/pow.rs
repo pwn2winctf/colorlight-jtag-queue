@@ -40,7 +40,7 @@ fn time() -> u64 {
 type HmacSha3_256 = Hmac<Sha3_256>;
 
 #[derive(Debug, Clone)]
-pub struct PoWHandler {
+pub struct PoWManager {
     pub spent_tokens: Arc<RwLock<HashMap<u64, Bloom<String>>>>,
 }
 
@@ -50,9 +50,9 @@ pub struct PoWToken {
     command: String,
 }
 
-impl PoWHandler {
+impl PoWManager {
     pub fn new() -> Self {
-        PoWHandler {
+        PoWManager {
             spent_tokens: Arc::new(RwLock::new(HashMap::new())),
         }
     }
