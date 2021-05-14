@@ -5,6 +5,7 @@ use hmac::{Hmac, Mac, NewMac};
 use serde::{Deserialize, Serialize};
 use sha3::Sha3_256;
 use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 use std::{io::Cursor, time::SystemTime};
 use thiserror::Error;
 
@@ -25,6 +26,8 @@ pub enum PoWError {
     DoubleSpend,
     #[error("hashcash error")]
     HashcashError(#[from] HashcashError),
+    #[error("rwlock error")]
+    RwLockError,
 }
 
 fn time() -> u64 {
@@ -38,7 +41,7 @@ type HmacSha3_256 = Hmac<Sha3_256>;
 
 #[derive(Debug, Clone)]
 pub struct PoWHandler {
-    pub spent_tokens: HashMap<u64, Bloom<String>>,
+    pub spent_tokens: Arc<RwLock<HashMap<u64, Bloom<String>>>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -50,7 +53,7 @@ pub struct PoWToken {
 impl PoWHandler {
     pub fn new() -> Self {
         PoWHandler {
-            spent_tokens: HashMap::new(),
+            spent_tokens: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -71,7 +74,7 @@ impl PoWHandler {
         });
     }
 
-    pub fn validate_token(&mut self, token: &str) -> Result<(), PoWError> {
+    pub fn validate_token(&self, token: &str) -> Result<(), PoWError> {
         // Validate hashcash PoW
         let tk = Token::from_str(token)?;
         if tk.bits != DIFFICULTY {
@@ -100,22 +103,21 @@ impl PoWHandler {
         mac.verify(tag).or(Err(PoWError::InvalidToken))?;
 
         // Validate token is not double spent
-        let bloom = self
-            .spent_tokens
+        let mut tokens = self.spent_tokens.write().or(Err(PoWError::RwLockError))?;
+        let bloom = tokens
             .entry(expiration)
             .or_insert(Bloom::new(BITMAP_BYTES_PER_SEC, EXPECT_ITEMS_PER_SEC));
         let exists_bloom = bloom.check(&remounted_token);
         bloom.set(&remounted_token);
 
         // collect garbage
-        let expired_keys: Vec<u64> = self
-            .spent_tokens
+        let expired_keys: Vec<u64> = tokens
             .iter()
             .filter(|&(&k, _)| k < ts)
             .map(|(&k, _)| k)
             .collect();
         for k in expired_keys {
-            self.spent_tokens.remove(&k);
+            tokens.remove(&k);
         }
 
         if exists_bloom {

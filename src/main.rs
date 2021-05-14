@@ -45,12 +45,12 @@ async fn get_token(pow_handler: pow::PoWHandler) -> Result<impl Reply, Rejection
 }
 
 async fn upload(
-    mut pow_handler: pow::PoWHandler,
+    pow_handler: pow::PoWHandler,
     token: String,
     form: FormData,
 ) -> Result<impl Reply, Rejection> {
     pow_handler
-        .validate_token(&token.trim())
+        .validate_token(&token)
         .map_err(|e| warp::reject::custom(e))?;
 
     let parts: Vec<Part> = form.try_collect().await.map_err(|e| {
