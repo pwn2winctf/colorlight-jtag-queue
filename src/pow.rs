@@ -12,10 +12,10 @@ use std::{io::Cursor, time::SystemTime};
 use thiserror::Error;
 
 lazy_static! {
+    static ref POW_SKIP_VALIDATION: bool = var("POW_SKIP_VALIDATION").unwrap().parse().unwrap();
     static ref TOKEN_TIMEOUT: u64 = var("TOKEN_TIMEOUT").unwrap().parse().unwrap();
     static ref POW_DIFFICULTY: u32 = var("POW_DIFFICULTY").unwrap().parse().unwrap();
     static ref SECRET_KEY: Vec<u8> = var("SECRET_KEY").unwrap().into_bytes();
-
     static ref BITMAP_BYTES_PER_SEC: usize = var("BITMAP_BYTES_PER_SEC").unwrap().parse().unwrap();
     static ref EXPECT_ITEMS_PER_SEC: usize = var("EXPECT_ITEMS_PER_SEC").unwrap().parse().unwrap();
 }
@@ -79,6 +79,10 @@ impl PoWManager {
     }
 
     pub fn validate_token(&self, token: &str) -> Result<(), PoWError> {
+        if *POW_SKIP_VALIDATION {
+            return Ok(());
+        }
+
         // Validate hashcash PoW
         let tk = Token::from_str(token)?;
         if tk.bits != *POW_DIFFICULTY {
