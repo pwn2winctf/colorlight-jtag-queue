@@ -2,19 +2,23 @@ use crate::hashcash::{HashcashError, Token};
 use bloomfilter::Bloom;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use hmac::{Hmac, Mac, NewMac};
+use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use sha3::Sha3_256;
 use std::collections::HashMap;
+use std::env::var;
 use std::sync::{Arc, RwLock};
 use std::{io::Cursor, time::SystemTime};
 use thiserror::Error;
 
-const TIMEOUT: u64 = 60;
-const DIFFICULTY: u32 = 28;
-const SECRET_KEY: &[u8] = b"qs6zfWbtDRezb7AE4W1QON16jAKraZ5U";
+lazy_static! {
+    static ref TOKEN_TIMEOUT: u64 = var("TOKEN_TIMEOUT").unwrap().parse().unwrap();
+    static ref POW_DIFFICULTY: u32 = var("POW_DIFFICULTY").unwrap().parse().unwrap();
+    static ref SECRET_KEY: Vec<u8> = var("SECRET_KEY").unwrap().into_bytes();
 
-const BITMAP_BYTES_PER_SEC: usize = 16;
-const EXPECT_ITEMS_PER_SEC: usize = 32;
+    static ref BITMAP_BYTES_PER_SEC: usize = var("BITMAP_BYTES_PER_SEC").unwrap().parse().unwrap();
+    static ref EXPECT_ITEMS_PER_SEC: usize = var("EXPECT_ITEMS_PER_SEC").unwrap().parse().unwrap();
+}
 
 #[derive(Error, Debug)]
 pub enum PoWError {
@@ -58,17 +62,17 @@ impl PoWManager {
     }
 
     pub fn get_token(&self) -> PoWToken {
-        let expiration = time() + TIMEOUT;
+        let expiration = time() + *TOKEN_TIMEOUT;
         let mut buf = vec![];
         buf.write_u64::<LittleEndian>(expiration).unwrap();
-        let mut mac = HmacSha3_256::new_from_slice(SECRET_KEY).unwrap();
+        let mut mac = HmacSha3_256::new_from_slice(SECRET_KEY.as_slice()).unwrap();
         mac.update(buf.as_slice());
         buf.extend(mac.finalize().into_bytes());
         PoWToken {
             expiration,
             command: format!(
                 "hashcash -Cmb{} {}",
-                DIFFICULTY,
+                *POW_DIFFICULTY,
                 base64::encode_config(buf, base64::URL_SAFE)
             ),
         }
@@ -77,7 +81,7 @@ impl PoWManager {
     pub fn validate_token(&self, token: &str) -> Result<(), PoWError> {
         // Validate hashcash PoW
         let tk = Token::from_str(token)?;
-        if tk.bits != DIFFICULTY {
+        if tk.bits != *POW_DIFFICULTY {
             return Err(PoWError::InvalidToken);
         }
         tk.check()?;
@@ -95,10 +99,10 @@ impl PoWManager {
         if ts > expiration {
             return Err(PoWError::ExpiredToken(expiration));
         }
-        if expiration >= ts + TIMEOUT {
+        if expiration >= ts + *TOKEN_TIMEOUT {
             return Err(PoWError::InvalidToken);
         }
-        let mut mac = HmacSha3_256::new_from_slice(SECRET_KEY).unwrap();
+        let mut mac = HmacSha3_256::new_from_slice(SECRET_KEY.as_slice()).unwrap();
         mac.update(data);
         mac.verify(tag).or(Err(PoWError::InvalidToken))?;
 
@@ -106,7 +110,7 @@ impl PoWManager {
         let mut tokens = self.spent_tokens.write().or(Err(PoWError::RwLockError))?;
         let bloom = tokens
             .entry(expiration)
-            .or_insert(Bloom::new(BITMAP_BYTES_PER_SEC, EXPECT_ITEMS_PER_SEC));
+            .or_insert(Bloom::new(*BITMAP_BYTES_PER_SEC, *EXPECT_ITEMS_PER_SEC));
         let exists_bloom = bloom.check(&remounted_token);
         bloom.set(&remounted_token);
 

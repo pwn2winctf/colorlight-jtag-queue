@@ -5,8 +5,10 @@ use crate::pow::{PoWError, PoWManager};
 use bytes::BufMut;
 use dotenv::dotenv;
 use futures::TryStreamExt;
+use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
+use std::env::var;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::sync::{
@@ -26,10 +28,12 @@ use warp::{
 #[macro_use]
 extern crate log;
 
-const MAX_FILE_SIZE: u64 = 600_000;
-const MAX_PENDING_OPS: usize = 32;
-const PROGRAMMING_TIMEOUT_MS: u32 = 15_000;
-const FPGA_RUN_TIME_MS: u64 = 30_000;
+lazy_static! {
+    static ref MAX_FILE_SIZE: u64 = var("MAX_FILE_SIZE").unwrap().parse().unwrap();
+    static ref MAX_PENDING_OPS: usize = var("MAX_PENDING_OPS").unwrap().parse().unwrap();
+    static ref PROGRAMMING_TIMEOUT_MS: u32 = var("PROGRAMMING_TIMEOUT_MS").unwrap().parse().unwrap();
+    static ref FPGA_RUN_TIME_MS: u64 = var("FPGA_RUN_TIME_MS").unwrap().parse().unwrap();
+}
 
 #[derive(Error, Debug)]
 pub enum APIError {
@@ -70,7 +74,7 @@ struct Queue {
 
 impl Queue {
     fn new() -> (Self, mpsc::Receiver<String>) {
-        let (tx, rx) = mpsc::sync_channel(MAX_PENDING_OPS);
+        let (tx, rx) = mpsc::sync_channel(*MAX_PENDING_OPS);
         (
             Queue {
                 enqueued: Arc::new(AtomicUsize::new(0)),
@@ -115,7 +119,7 @@ fn worker_main(queue: Queue, rx: mpsc::Receiver<String>) {
                 queue.worker_state.fetch_add(2, Ordering::SeqCst);
             }
             Ok(mut child) => {
-                match child.wait_timeout_ms(PROGRAMMING_TIMEOUT_MS) {
+                match child.wait_timeout_ms(*PROGRAMMING_TIMEOUT_MS) {
                     Err(e) => error!("error waiting for child {}: {:?}", child.id(), e),
                     Ok(exitstatus) => {
                         if exitstatus.is_none() {
@@ -130,7 +134,7 @@ fn worker_main(queue: Queue, rx: mpsc::Receiver<String>) {
                 queue.worker_state.fetch_add(1, Ordering::SeqCst);
 
                 // wait and let run
-                std::thread::sleep(std::time::Duration::from_millis(FPGA_RUN_TIME_MS));
+                std::thread::sleep(std::time::Duration::from_millis(*FPGA_RUN_TIME_MS));
 
                 // state Running -> Wait
                 queue.worker_state.fetch_add(1, Ordering::SeqCst);
@@ -177,7 +181,7 @@ async fn main() {
         .and(pow_mgr_filter.clone())
         .and(hashcash_filter)
         .and(queue_filter.clone())
-        .and(warp::multipart::form().max_length(MAX_FILE_SIZE))
+        .and(warp::multipart::form().max_length(*MAX_FILE_SIZE))
         .and_then(upload);
 
     let cors = warp::cors()

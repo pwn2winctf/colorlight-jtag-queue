@@ -111,6 +111,7 @@ dependencies = [
  "env_logger",
  "futures",
  "hmac",
+ "lazy_static",
  "log",
  "serde",
  "sha-1",
