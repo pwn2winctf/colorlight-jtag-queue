@@ -3,6 +3,7 @@ mod pow;
 
 use crate::pow::{PoWError, PoWManager};
 use bytes::BufMut;
+use dotenv::dotenv;
 use futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
@@ -22,6 +23,8 @@ use warp::{
     reject::Reject,
     Filter, Rejection, Reply,
 };
+#[macro_use]
+extern crate log;
 
 const MAX_FILE_SIZE: u64 = 600_000;
 const MAX_PENDING_OPS: usize = 32;
@@ -84,13 +87,13 @@ fn worker_main(queue: Queue, rx: mpsc::Receiver<String>) {
         let filename = match rx.recv() {
             Err(e) => {
                 // since we did not retrieve anything from queue, we should not advance state
-                eprintln!("cannot receive filename from channel: {:#?}", e);
+                error!("cannot receive filename from channel: {:?}", e);
                 continue;
             }
             Ok(v) => v,
         };
-        println!(
-            "=> programming {:#?} ({}/{})",
+        info!(
+            "=> programming {:?} ({}/{})",
             &filename,
             queue.worker_state.load(Ordering::SeqCst) / 3 + 1,
             queue.enqueued.load(Ordering::SeqCst)
@@ -106,18 +109,17 @@ fn worker_main(queue: Queue, rx: mpsc::Receiver<String>) {
             .spawn()
         {
             Err(e) => {
-                eprintln!("error spawning child: {:#?}", e);
+                error!("error spawning child: {:?}", e);
 
                 // state Programming -> Wait
                 queue.worker_state.fetch_add(2, Ordering::SeqCst);
             }
             Ok(mut child) => {
                 match child.wait_timeout_ms(PROGRAMMING_TIMEOUT_MS) {
-                    Err(e) => eprintln!("error waiting for child {}: {:#?}", child.id(), e),
+                    Err(e) => error!("error waiting for child {}: {:?}", child.id(), e),
                     Ok(exitstatus) => {
                         if exitstatus.is_none() {
-                            // child has not exited
-                            eprintln!("killing child {}", child.id());
+                            error!("child has not exited! killing child {}", child.id());
                             let _ = child.kill();
                             let _ = child.wait();
                         }
@@ -136,12 +138,15 @@ fn worker_main(queue: Queue, rx: mpsc::Receiver<String>) {
         }
 
         let _ = std::fs::remove_file(&filename)
-            .map_err(|e| eprintln!("cannot remove file {:#?}: {:#?}", filename, e));
+            .map_err(|e| error!("cannot remove file {:?}: {:?}", filename, e));
     }
 }
 
 #[tokio::main]
 async fn main() {
+    dotenv().ok();
+    env_logger::init();
+
     let pow_mgr = PoWManager::new();
     let pow_mgr_filter = warp::any().map(move || pow_mgr.clone());
 
@@ -175,11 +180,17 @@ async fn main() {
         .and(warp::multipart::form().max_length(MAX_FILE_SIZE))
         .and_then(upload);
 
+    let cors = warp::cors()
+        .allow_any_origin()
+        .allow_headers(vec!["content-type"])
+        .allow_methods(vec!["GET", "POST"]);
+
     let router = upload_route
         .or(status_route)
         .or(token_route)
+        .with(cors)
         .recover(handle_rejection);
-    println!("Server started at localhost:8080");
+
     warp::serve(router).run(([0, 0, 0, 0], 8080)).await;
 }
 
@@ -240,7 +251,7 @@ async fn upload(
             if let Err(e) = res {
                 let _ = tokio::fs::remove_file(&filename)
                     .await
-                    .map_err(|e| eprintln!("cannot remove file {:#?}: {:#?}", filename, e));
+                    .map_err(|e| error!("cannot remove file {:?}: {:?}", filename, e));
                 return Err(e);
             }
             let pos = queue.enqueued.fetch_add(1, Ordering::SeqCst);
@@ -270,7 +281,7 @@ async fn handle_rejection(err: Rejection) -> std::result::Result<impl Reply, Inf
             e.to_string(),
         )
     } else {
-        eprintln!("unhandled error: {:?}", err);
+        error!("unhandled error: {:?}", err);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             "Internal Server Error".to_string(),
