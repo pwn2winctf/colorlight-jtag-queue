@@ -1,2 +1,3 @@
-#!/bin/bash
-echo "I'm supposed to program '$1' to FPGA"
+#!/bin/bash -xe
+trap "rm -f '$1.svf'" EXIT
+fujprog -s "$1.svf" "$1"
