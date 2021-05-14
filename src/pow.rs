@@ -13,8 +13,8 @@ const TIMEOUT: u64 = 60;
 const DIFFICULTY: u32 = 28;
 const SECRET_KEY: &[u8] = b"qs6zfWbtDRezb7AE4W1QON16jAKraZ5U";
 
-const BITMAP_BYTES_PER_SEC: usize = 4096;
-const EXPECT_ITEMS_PER_SEC: usize = 1024;
+const BITMAP_BYTES_PER_SEC: usize = 16;
+const EXPECT_ITEMS_PER_SEC: usize = 32;
 
 #[derive(Error, Debug)]
 pub enum PoWError {
