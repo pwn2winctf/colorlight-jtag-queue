@@ -92,7 +92,7 @@ async fn handle_rejection(err: Rejection) -> std::result::Result<impl Reply, Inf
     } else if let Some(_) = err.find::<warp::reject::PayloadTooLarge>() {
         (StatusCode::BAD_REQUEST, "Payload too large".to_string())
     } else if let Some(e) = err.find::<pow::PoWError>() {
-        (StatusCode::BAD_REQUEST, format!("{:#?}", e))
+        (StatusCode::BAD_REQUEST, e.to_string())
     } else {
         eprintln!("unhandled error: {:?}", err);
         (

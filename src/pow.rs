@@ -24,7 +24,7 @@ pub enum PoWError {
     ExpiredToken(u64),
     #[error("token already spent")]
     DoubleSpend,
-    #[error("hashcash error")]
+    #[error("hashcash error: {0}")]
     HashcashError(#[from] HashcashError),
     #[error("rwlock error")]
     RwLockError,
