@@ -31,6 +31,7 @@ use warp::{
 extern crate log;
 
 lazy_static! {
+    static ref LISTEN_PORT: u16 = var("LISTEN_PORT").unwrap().parse().unwrap();
     static ref MAX_FILE_SIZE: u64 = var("MAX_FILE_SIZE").unwrap().parse().unwrap();
     static ref MAX_PENDING_OPS: usize = var("MAX_PENDING_OPS").unwrap().parse().unwrap();
     static ref PROGRAMMING_TIMEOUT_SECS: u32 =
@@ -209,7 +210,7 @@ async fn main() {
         .with(cors)
         .recover(handle_rejection);
 
-    warp::serve(router).run(([0, 0, 0, 0], 8080)).await;
+    warp::serve(router).run(([0, 0, 0, 0], *LISTEN_PORT)).await;
 }
 
 async fn get_token(pow_mgr: PoWManager) -> Result<impl Reply, Rejection> {
