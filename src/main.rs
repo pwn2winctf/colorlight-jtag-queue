@@ -6,10 +6,8 @@ use bytes::BufMut;
 use dotenv::dotenv;
 use futures::TryStreamExt;
 use lazy_static::lazy_static;
-use nix::sys::signal::{self, Signal};
-use nix::unistd::Pid;
 use serde::{Deserialize, Serialize};
-use std::convert::{Infallible, TryInto};
+use std::convert::Infallible;
 use std::env::var;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -20,7 +18,6 @@ use std::sync::{
 use std::thread;
 use thiserror::Error;
 use uuid::Uuid;
-use wait_timeout::ChildExt;
 use warp::{
     http::{
         header::{HeaderMap, HeaderValue},
@@ -36,9 +33,9 @@ extern crate log;
 lazy_static! {
     static ref MAX_FILE_SIZE: u64 = var("MAX_FILE_SIZE").unwrap().parse().unwrap();
     static ref MAX_PENDING_OPS: usize = var("MAX_PENDING_OPS").unwrap().parse().unwrap();
-    static ref PROGRAMMING_TIMEOUT_MS: u32 =
-        var("PROGRAMMING_TIMEOUT_MS").unwrap().parse().unwrap();
-    static ref FPGA_RUN_TIME_MS: u64 = var("FPGA_RUN_TIME_MS").unwrap().parse().unwrap();
+    static ref PROGRAMMING_TIMEOUT_SECS: u32 =
+        var("PROGRAMMING_TIMEOUT_SECS").unwrap().parse().unwrap();
+    static ref FPGA_RUN_TIME_SECS: u64 = var("FPGA_RUN_TIME_SECS").unwrap().parse().unwrap();
 }
 
 #[derive(Error, Debug)]
@@ -115,7 +112,9 @@ fn worker_main(queue: Queue, rx: mpsc::Receiver<String>) {
 
         let mut success = false;
 
-        match Command::new("./program")
+        match Command::new("timeout")
+            .arg(PROGRAMMING_TIMEOUT_SECS.to_string())
+            .arg("./program")
             .arg(&filename)
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
@@ -124,28 +123,15 @@ fn worker_main(queue: Queue, rx: mpsc::Receiver<String>) {
             Err(e) => {
                 error!("error spawning child: {:?}", e);
             }
-            Ok(mut child) => match child.wait_timeout_ms(*PROGRAMMING_TIMEOUT_MS) {
+            Ok(mut child) => match child.wait() {
                 Err(e) => error!("error waiting for child {}: {:?}", child.id(), e),
-                Ok(exitstatus) => match exitstatus {
-                    None => {
-                        error!(
-                            "child has not exited! sending SIGTERM to child {}",
-                            child.id()
-                        );
-                        let _ = signal::kill(
-                            Pid::from_raw(child.id().try_into().unwrap()),
-                            Signal::SIGTERM,
-                        );
-                        let _ = child.wait();
+                Ok(status) => {
+                    if status.success() {
+                        success = true;
+                    } else {
+                        error!("programming failed with status {:?}", status);
                     }
-                    Some(status) => {
-                        if status.success() {
-                            success = true;
-                        } else {
-                            error!("programming failed with status {:?}", status);
-                        }
-                    }
-                },
+                }
             },
         }
 
@@ -156,7 +142,7 @@ fn worker_main(queue: Queue, rx: mpsc::Receiver<String>) {
             // state Programming -> Running
             queue.worker_state.fetch_add(1, Ordering::SeqCst);
             // wait and let run
-            std::thread::sleep(std::time::Duration::from_millis(*FPGA_RUN_TIME_MS));
+            std::thread::sleep(std::time::Duration::from_secs(*FPGA_RUN_TIME_SECS));
             // state Running -> Wait
             queue.worker_state.fetch_add(1, Ordering::SeqCst);
         } else {

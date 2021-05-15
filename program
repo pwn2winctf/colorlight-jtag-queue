@@ -1,8 +1,4 @@
 #!/bin/bash -xe
-
-# kill descendants if we receive a SIGTERM
-trap "pkill -SIGTERM -P $$" SIGTERM
-
 tmp="$(mktemp /tmp/program.XXXXXX.cfg)"
 exec 3>"$tmp"
 rm "$tmp"
@@ -11,10 +7,7 @@ tmp="$(mktemp /tmp/program.XXXXXX.svf)"
 exec 4>"$tmp"
 rm "$tmp"
 
-ecpunpack "$1" "/proc/$$/fd/3" &
-wait -f $!
-ecppack --svf "/proc/$$/fd/4" "/proc/$$/fd/3" &
-wait -f $!
+ecpunpack "$1" "/proc/$$/fd/3"
+ecppack --svf "/proc/$$/fd/4" "/proc/$$/fd/3"
 
-openocd -f "openocd.cfg" -c "svf -tap ecp5.tap -quiet -progress \"/proc/$$/fd/4\"; exit" &
-wait -f $!
+openocd -f "openocd.cfg" -c "svf -tap ecp5.tap -quiet -progress \"/proc/$$/fd/4\"; exit"
