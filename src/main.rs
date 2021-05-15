@@ -9,7 +9,7 @@ use lazy_static::lazy_static;
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
 use serde::{Deserialize, Serialize};
-use std::convert::Infallible;
+use std::convert::{Infallible, TryInto};
 use std::env::var;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -128,8 +128,14 @@ fn worker_main(queue: Queue, rx: mpsc::Receiver<String>) {
                 Err(e) => error!("error waiting for child {}: {:?}", child.id(), e),
                 Ok(exitstatus) => match exitstatus {
                     None => {
-                        error!("child has not exited! sending SIGTERM to child {}", child.id());
-                        let _ = signal::kill(Pid::from_raw(child.id()), Signal::SIGTERM);
+                        error!(
+                            "child has not exited! sending SIGTERM to child {}",
+                            child.id()
+                        );
+                        let _ = signal::kill(
+                            Pid::from_raw(child.id().try_into().unwrap()),
+                            Signal::SIGTERM,
+                        );
                         let _ = child.wait();
                     }
                     Some(status) => {
