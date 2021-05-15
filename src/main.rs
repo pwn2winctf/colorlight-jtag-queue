@@ -6,6 +6,8 @@ use bytes::BufMut;
 use dotenv::dotenv;
 use futures::TryStreamExt;
 use lazy_static::lazy_static;
+use nix::sys::signal::{self, Signal};
+use nix::unistd::Pid;
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use std::env::var;
@@ -20,7 +22,10 @@ use thiserror::Error;
 use uuid::Uuid;
 use wait_timeout::ChildExt;
 use warp::{
-    http::{StatusCode, header::{HeaderMap, HeaderValue}},
+    http::{
+        header::{HeaderMap, HeaderValue},
+        StatusCode,
+    },
     multipart::{FormData, Part},
     reject::Reject,
     Filter, Rejection, Reply,
@@ -123,8 +128,8 @@ fn worker_main(queue: Queue, rx: mpsc::Receiver<String>) {
                 Err(e) => error!("error waiting for child {}: {:?}", child.id(), e),
                 Ok(exitstatus) => match exitstatus {
                     None => {
-                        error!("child has not exited! killing child {}", child.id());
-                        let _ = child.kill();
+                        error!("child has not exited! sending SIGTERM to child {}", child.id());
+                        let _ = signal::kill(Pid::from_raw(child.id()), Signal::SIGTERM);
                         let _ = child.wait();
                     }
                     Some(status) => {
@@ -176,7 +181,10 @@ async fn main() {
         .unify();
 
     let mut cache_headers = HeaderMap::new();
-    cache_headers.insert("cache-control", HeaderValue::from_static("max-age=1, s-maxage=1, stale-while-revalidate, public"));
+    cache_headers.insert(
+        "cache-control",
+        HeaderValue::from_static("max-age=1, s-maxage=1, stale-while-revalidate, public"),
+    );
 
     let token_route = warp::path("token")
         .and(warp::get())

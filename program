@@ -1,3 +1,14 @@
 #!/bin/bash -xe
-trap "rm -f '$1.svf'" EXIT
-fujprog -s "$1.svf" "$1"
+tmp="$(mktemp /tmp/program.XXXXXX.cfg)"
+exec 3>"$tmp"
+rm "$tmp"
+
+tmp="$(mktemp /tmp/program.XXXXXX.svf)"
+exec 4>"$tmp"
+rm "$tmp"
+
+ecpunpack "$1" "/proc/$$/fd/3"
+ecppack --svf "/proc/$$/fd/4" "/proc/$$/fd/3"
+
+killall openocd || true
+openocd -f "openocd.cfg" -c "svf -tap ecp5.tap -quiet -progress \"/proc/$$/fd/4\"; exit"
