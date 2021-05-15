@@ -1,0 +1,12 @@
+[Unit]
+Description=colorlight-jtag-queue
+
+[Service]
+WorkingDirectory=/home/jtag
+ExecStart=/home/jtag/colorlight-jtag-queue
+Restart=always
+User=jtag
+Group=jtag
+
+[Install]
+WantedBy=multi-user.target
