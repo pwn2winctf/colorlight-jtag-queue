@@ -9,6 +9,7 @@ use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use std::env::var;
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::sync::{
@@ -31,7 +32,10 @@ use warp::{
 extern crate log;
 
 lazy_static! {
+    static ref TLS_CERT: String = var("TLS_CERT").unwrap();
+    static ref TLS_KEY: String = var("TLS_KEY").unwrap();
     static ref LISTEN_PORT: u16 = var("LISTEN_PORT").unwrap().parse().unwrap();
+    static ref FILES_PATH: String = var("FILES_PATH").unwrap();
     static ref MAX_FILE_SIZE: u64 = var("MAX_FILE_SIZE").unwrap().parse().unwrap();
     static ref MAX_PENDING_OPS: usize = var("MAX_PENDING_OPS").unwrap().parse().unwrap();
     static ref PROGRAMMING_TIMEOUT_SECS: u32 =
@@ -210,7 +214,16 @@ async fn main() {
         .with(cors)
         .recover(handle_rejection);
 
-    warp::serve(router).run(([0, 0, 0, 0], *LISTEN_PORT)).await;
+    if !(*TLS_CERT).is_empty() && !(*TLS_KEY).is_empty() {
+        warp::serve(router)
+            .tls()
+            .cert_path(&*TLS_CERT)
+            .key_path(&*TLS_KEY)
+            .run(([0, 0, 0, 0], *LISTEN_PORT))
+            .await;
+    } else {
+        warp::serve(router).run(([0, 0, 0, 0], *LISTEN_PORT)).await;
+    };
 }
 
 async fn get_token(pow_mgr: PoWManager) -> Result<impl Reply, Rejection> {
@@ -258,14 +271,14 @@ async fn upload(
                 .await
                 .map_err(|e| warp::reject::custom(APIError::ReadReqError(e.to_string())))?;
 
-            let filename = format!("./files/{}", Uuid::new_v4().to_string());
+            let filename = Path::new(&*FILES_PATH).join(Uuid::new_v4().to_string());
             tokio::fs::write(&filename, value)
                 .await
                 .map_err(|e| warp::reject::custom(APIError::WriteFileError(e.to_string())))?;
 
             let res = queue
                 .tx
-                .try_send(filename.clone())
+                .try_send(filename.to_str().unwrap().to_string())
                 .map_err(|e| warp::reject::custom(APIError::EnqueueError(e.to_string())));
             if let Err(e) = res {
                 let _ = tokio::fs::remove_file(&filename)
