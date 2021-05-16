@@ -211,8 +211,8 @@ async fn main() {
     let router = upload_route
         .or(status_route)
         .or(token_route)
-        .with(cors)
-        .recover(handle_rejection);
+        .recover(handle_rejection)
+        .with(cors);
 
     if !(*TLS_CERT).is_empty() && !(*TLS_KEY).is_empty() {
         warp::serve(router)
