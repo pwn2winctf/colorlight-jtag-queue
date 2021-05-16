@@ -71,7 +71,7 @@ impl PoWManager {
         PoWToken {
             expiration,
             command: format!(
-                "hashcash -Cmb{} {}",
+                "hashcash -Cmb{} -r {}",
                 *POW_DIFFICULTY,
                 base64::encode_config(buf, base64::URL_SAFE)
             ),
